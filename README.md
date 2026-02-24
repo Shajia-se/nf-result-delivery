@@ -1,6 +1,6 @@
 # nf-result-delivery
 
-Delivery packager module for your ChIP-seq workflow outputs.
+Delivery packager module for ChIP-seq workflow outputs.
 
 ## What it does
 
@@ -14,30 +14,37 @@ Builds `final_delivery_<YYYYMMDD>` and organizes outputs into:
 - `06_Annotation_ChIPseeker`
 - `07_BrowserTracks`
 - `08_Summary`
+- `09_MultiQC`
 
 Also generates:
 
-- `08_Summary/final_summary.tsv` (template + auto-filled FRiP/contrast rows where available)
+- `08_Summary/final_summary.tsv`
 - `08_Summary/README_result_notes.md`
 
+## Delivery Levels
+
+- `lean` (default): compact delivery package, excludes larger files (`.bw`, deepTools matrix tables)
+- `full`: includes browser tracks (`.bw`) and deepTools matrix tables
+
+This module copies selected files into a clean final folder (not symlink mode), so package size depends on included file types.
+
 ## Run on HPC
+
+Default (lean, no extra parameter required):
 
 ```bash
 cd /ictstr01/groups/idc/projects/uhlenhaut/jiang/pipelines/nf-result-delivery
 nextflow run main.nf -profile hpc
 ```
 
-## Optional
+Full package:
 
-Set custom date tag:
+```bash
+nextflow run main.nf -profile hpc --delivery_level full
+```
+
+Optional custom tag:
 
 ```bash
 nextflow run main.nf -profile hpc --delivery_tag 20260221
-```
-
-Set custom root paths if needed:
-
-```bash
-nextflow run main.nf -profile hpc \
-  --pipelines_root /ictstr01/groups/idc/projects/uhlenhaut/jiang/pipelines
 ```
