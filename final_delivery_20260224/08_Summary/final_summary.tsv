@@ -1,0 +1,6 @@
+level	sample_or_group	condition	replicate	frip	idr_peak_count	diffbind_sig_count	diffbind_unique_up_count	diffbind_unique_down_count	top_motif_1	top_motif_2	top_annotation_1	top_annotation_2	notes
+sample	GAR0968	NA	NA	0.012095	NA	NA	NA	NA	NA	NA	NA	NA	
+sample	GAR0979	NA	NA	0.012828	NA	NA	NA	NA	NA	NA	NA	NA	
+sample	GAR1585	NA	NA	0.008147	NA	NA	NA	NA	NA	NA	NA	NA	
+sample	GAR1586	NA	NA	0.009893	NA	NA	NA	NA	NA	NA	NA	NA	
+contrast	TG.vs.WT	NA	NA	NA	NA	1638	612	1026	NA	NA	NA	NA	Exploratory if batch confounded
