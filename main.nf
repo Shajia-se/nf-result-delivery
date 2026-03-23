@@ -112,6 +112,7 @@ pct_duplicates	Fraction of duplicate reads reported by Picard MarkDuplicates	nf-
 unique_reads_mapq4	Reads retained in clean BAM after MAPQ>=4 and mito removal	nf-chipfilter + nf-result-delivery	samtools view -c -F 260 on .clean.bam
 pct_reads_used_mapq4_of_raw	unique_reads_mapq4 divided by raw_reads x 100	nf-result-delivery	Computed during QC table build
 macs3_peaks_q0.1	Peak count from MACS3 idr_q0.1 branch after peak-level blacklist filtering	nf-macs3	wc -l on idr_q0.1/<sample>_peaks.narrowPeak
+macs3_peaks_q0.05	Peak count from MACS3 QC q0.05 branch after peak-level blacklist filtering	nf-macs3	wc -l on qc_q0.05/<sample>_peaks.narrowPeak
 macs3_peaks_q0.01	Peak count from MACS3 strict_q0.01 branch after peak-level blacklist filtering	nf-macs3	wc -l on strict_q0.01/<sample>_peaks.narrowPeak
 frip_idr	FRiP using IDR peaks	nf-frip	<sample>.idr.frip.tsv FRiP column
 frip_consensus	FRiP using peak-consensus peaks	nf-frip	<sample>.consensus.frip.tsv FRiP column
@@ -135,10 +136,13 @@ frip_out = Path("${params.frip_out}")
 header = [
     "sample_id", "condition", "replicate", "library_type", "is_control", "control_id",
     "raw_reads", "mapped_reads", "pct_mapped_reads", "mapped_reads_dedup", "pct_duplicates",
-    "unique_reads_mapq4", "pct_reads_used_mapq4_of_raw", "macs3_peaks_q0.1", "macs3_peaks_q0.01",
+    "unique_reads_mapq4", "pct_reads_used_mapq4_of_raw", "macs3_peaks_q0.1", "macs3_peaks_q0.05", "macs3_peaks_q0.01",
     "frip_idr", "frip_consensus"
 ]
 print("\\t".join(header))
+def na(x):
+    return "NA" if x in ("", None) else str(x)
+
 def read_fastp_raw_reads(sample_id):
     p = fastp_out / f"{sample_id}.fastp.json"
     if not p.exists():
@@ -240,12 +244,14 @@ with samples_master.open(newline="") as fh:
             continue
 
         sample_id = (row.get("sample_id") or "").strip()
+        is_control = (row.get("is_control") or "").strip().lower() == "true"
         raw_reads = read_fastp_raw_reads(sample_id)
         mapped_reads, pct_mapped_reads = read_bwa_mapping(sample_id)
         mapped_reads_dedup = samtools_count(picard_out / f"{sample_id}.dedup.bam")
         pct_duplicates = read_picard_dup_pct(sample_id)
         unique_reads_mapq4 = samtools_count(chipfilter_out / f"{sample_id}.clean.bam")
         macs3_peaks_q01 = line_count(macs3_out / "strict_q0.01" / f"{sample_id}_peaks.narrowPeak")
+        macs3_peaks_q05 = line_count(macs3_out / "qc_q0.05" / f"{sample_id}_peaks.narrowPeak")
         macs3_peaks_q10 = line_count(macs3_out / "idr_q0.1" / f"{sample_id}_peaks.narrowPeak")
         frip_idr = read_frip(sample_id, "idr")
         frip_consensus = read_frip(sample_id, "consensus")
@@ -257,24 +263,32 @@ with samples_master.open(newline="") as fh:
         except Exception:
             pct_reads_used = ""
 
+        if is_control:
+            macs3_peaks_q10 = ""
+            macs3_peaks_q05 = ""
+            macs3_peaks_q01 = ""
+            frip_idr = ""
+            frip_consensus = ""
+
         out = [
-            sample_id,
-            (row.get("condition") or "").strip(),
-            (row.get("replicate") or "").strip(),
-            (row.get("library_type") or "").strip(),
-            (row.get("is_control") or "").strip(),
-            (row.get("control_id") or "").strip(),
-            raw_reads,
-            mapped_reads,
-            pct_mapped_reads,
-            mapped_reads_dedup,
-            pct_duplicates,
-            unique_reads_mapq4,
-            pct_reads_used,
-            macs3_peaks_q10,
-            macs3_peaks_q01,
-            frip_idr,
-            frip_consensus,
+            na(sample_id),
+            na((row.get("condition") or "").strip()),
+            na((row.get("replicate") or "").strip()),
+            na((row.get("library_type") or "").strip()),
+            na((row.get("is_control") or "").strip()),
+            na((row.get("control_id") or "").strip()),
+            na(raw_reads),
+            na(mapped_reads),
+            na(pct_mapped_reads),
+            na(mapped_reads_dedup),
+            na(pct_duplicates),
+            na(unique_reads_mapq4),
+            na(pct_reads_used),
+            na(macs3_peaks_q10),
+            na(macs3_peaks_q05),
+            na(macs3_peaks_q01),
+            na(frip_idr),
+            na(frip_consensus),
         ]
         print("\\t".join(out))
 PY
