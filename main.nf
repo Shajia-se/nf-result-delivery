@@ -107,15 +107,16 @@ control_id	Matched control sample_id for ChIP sample	nextflow-chipseq	samples_ma
 raw_reads	Total raw reads before filtering	nf-fastp	.fastp.json summary.before_filtering.total_reads
 mapped_reads	Number of mapped reads before duplicate removal	nf-bwa	.bam.stat line: mapped
 pct_mapped_reads	Percent mapped before duplicate removal	nf-bwa	.bam.stat line: mapped percent
-mapped_reads_dedup	Number of mapped reads after duplicate removal	nf-picard + nf-result-delivery	samtools view -c -F 260 on .dedup.bam
-pct_duplicates	Fraction of duplicate reads reported by Picard MarkDuplicates	nf-picard	.dedup.metrics.txt PERCENT_DUPLICATION x 100
-unique_reads_mapq4	Reads retained in clean BAM after MAPQ>=4 and mito removal	nf-chipfilter + nf-result-delivery	samtools view -c -F 260 on .clean.bam
-pct_reads_used_mapq4_of_raw	unique_reads_mapq4 divided by raw_reads x 100	nf-result-delivery	Computed during QC table build
+mapped_reads_dedup	Number of mapped reads after duplicate removal	nf-picard	<sample>.picard_qc.stats.tsv mapped_reads_postdup
+pct_duplicates	Fraction of duplicate reads reported by Picard MarkDuplicates	nf-picard	<sample>.picard_qc.stats.tsv pct_duplicates
+unique_reads_mapq4	Reads retained in clean BAM after MAPQ>=4 and mito removal	nf-chipfilter	<sample>.chipfilter.stats.tsv clean_reads
+pct_reads_used_mapq4_of_raw	unique_reads_mapq4 divided by raw_reads x 100	nf-chipfilter + nf-result-delivery	Computed from chipfilter.stats.tsv clean_reads and fastp raw_reads
 macs3_peaks_q0.1	Peak count from MACS3 idr_q0.1 branch after peak-level blacklist filtering	nf-macs3	wc -l on idr_q0.1/<sample>_peaks.narrowPeak
-macs3_peaks_q0.05	Peak count from MACS3 QC q0.05 branch after peak-level blacklist filtering	nf-macs3	wc -l on qc_q0.05/<sample>_peaks.narrowPeak
+macs3_peaks_q0.05	Peak count from MACS3 relaxed consensus q0.05 branch after peak-level blacklist filtering	nf-macs3	wc -l on consensus_q0.05/<sample>_peaks.narrowPeak
 macs3_peaks_q0.01	Peak count from MACS3 strict_q0.01 branch after peak-level blacklist filtering	nf-macs3	wc -l on strict_q0.01/<sample>_peaks.narrowPeak
 frip_idr	FRiP using IDR peaks	nf-frip	<sample>.idr.frip.tsv FRiP column
-frip_consensus	FRiP using peak-consensus peaks	nf-frip	<sample>.consensus.frip.tsv FRiP column
+frip_consensus_q0.01	FRiP using strict_q0.01 consensus peaks	nf-frip	<sample>.consensus_q0.01.frip.tsv FRiP column
+frip_consensus_q0.05	FRiP using consensus_q0.05 peaks	nf-frip	<sample>.consensus_q0.05.frip.tsv FRiP column
 TSV
 
   python3 - <<'PY' > "\$dest/08_Summary/qc_master_table.sample.tsv.tmp"
@@ -137,7 +138,7 @@ header = [
     "sample_id", "condition", "replicate", "library_type", "is_control", "control_id",
     "raw_reads", "mapped_reads", "pct_mapped_reads", "mapped_reads_dedup", "pct_duplicates",
     "unique_reads_mapq4", "pct_reads_used_mapq4_of_raw", "macs3_peaks_q0.1", "macs3_peaks_q0.05", "macs3_peaks_q0.01",
-    "frip_idr", "frip_consensus"
+    "frip_idr", "frip_consensus_q0.01", "frip_consensus_q0.05"
 ]
 print("\\t".join(header))
 def na(x):
@@ -169,54 +170,6 @@ def read_bwa_mapping(sample_id):
           break
     return mapped, pct
 
-def read_picard_dup_pct(sample_id):
-    p = picard_out / f"{sample_id}.dedup.metrics.txt"
-    if not p.exists():
-        return ""
-    lines = [ln.rstrip("\\n") for ln in p.read_text().splitlines()]
-    header_idx = None
-    for i, ln in enumerate(lines):
-        if "PERCENT_DUPLICATION" in ln and not ln.startswith("#"):
-            header_idx = i
-            break
-    if header_idx is None:
-        return ""
-    data_idx = None
-    for j in range(header_idx + 1, len(lines)):
-        ln = lines[j].strip()
-        if ln and not ln.startswith("#"):
-            data_idx = j
-            break
-    if data_idx is None:
-        return ""
-    cols = lines[header_idx].split("\\t")
-    vals = lines[data_idx].split("\\t")
-    try:
-        idx = cols.index("PERCENT_DUPLICATION")
-        val = vals[idx]
-        return f"{float(val) * 100:.2f}"
-    except Exception:
-        return ""
-
-def samtools_count(path_obj):
-    if not path_obj.exists():
-        return ""
-    try:
-        out = subprocess.check_output(
-            ["samtools", "view", "-c", "-F", "260", str(path_obj)],
-            text=True
-        ).strip()
-        return out
-    except Exception:
-        return ""
-
-def resolve_first(prefix, suffix, directory):
-    hits = sorted(directory.glob(f"{prefix}*{suffix}"))
-    if not hits:
-        return None
-    exact = [p for p in hits if p.name == f"{prefix}{suffix}"]
-    return exact[0] if exact else hits[0]
-
 def line_count(path_obj):
     if not path_obj or not path_obj.exists():
         return ""
@@ -236,6 +189,30 @@ def read_frip(sample_id, peak_set):
     vals = rows[1].split("\\t")
     return vals[6] if len(vals) > 6 else ""
 
+def read_chipfilter_stats(sample_id):
+    p = chipfilter_out / f"{sample_id}.chipfilter.stats.tsv"
+    if not p.exists():
+        return "", ""
+    rows = p.read_text().strip().splitlines()
+    if len(rows) < 2:
+        return "", ""
+    vals = rows[1].split("\\t")
+    clean_reads = vals[3] if len(vals) > 3 else ""
+    pct_retained = vals[4] if len(vals) > 4 else ""
+    return clean_reads, pct_retained
+
+def read_picard_stats(sample_id):
+    p = picard_out / f"{sample_id}.picard_qc.stats.tsv"
+    if not p.exists():
+        return "", ""
+    rows = p.read_text().strip().splitlines()
+    if len(rows) < 2:
+        return "", ""
+    vals = rows[1].split("\\t")
+    mapped = vals[2] if len(vals) > 2 else ""
+    pctdup = vals[3] if len(vals) > 3 else ""
+    return mapped, pctdup
+
 with samples_master.open(newline="") as fh:
     reader = csv.DictReader(fh)
     for row in reader:
@@ -247,14 +224,16 @@ with samples_master.open(newline="") as fh:
         is_control = (row.get("is_control") or "").strip().lower() == "true"
         raw_reads = read_fastp_raw_reads(sample_id)
         mapped_reads, pct_mapped_reads = read_bwa_mapping(sample_id)
-        mapped_reads_dedup = samtools_count(picard_out / f"{sample_id}.dedup.bam")
-        pct_duplicates = read_picard_dup_pct(sample_id)
-        unique_reads_mapq4 = samtools_count(chipfilter_out / f"{sample_id}.clean.bam")
+        mapped_reads_dedup, pct_duplicates = read_picard_stats(sample_id)
+        unique_reads_mapq4, pct_retained_after_mito = read_chipfilter_stats(sample_id)
         macs3_peaks_q01 = line_count(macs3_out / "strict_q0.01" / f"{sample_id}_peaks.narrowPeak")
-        macs3_peaks_q05 = line_count(macs3_out / "qc_q0.05" / f"{sample_id}_peaks.narrowPeak")
+        macs3_peaks_q05 = line_count(macs3_out / "consensus_q0.05" / f"{sample_id}_peaks.narrowPeak")
         macs3_peaks_q10 = line_count(macs3_out / "idr_q0.1" / f"{sample_id}_peaks.narrowPeak")
         frip_idr = read_frip(sample_id, "idr")
-        frip_consensus = read_frip(sample_id, "consensus")
+        frip_consensus_q001 = read_frip(sample_id, "consensus_q0.01")
+        if not frip_consensus_q001:
+            frip_consensus_q001 = read_frip(sample_id, "consensus")
+        frip_consensus_q005 = read_frip(sample_id, "consensus_q0.05")
 
         pct_reads_used = ""
         try:
@@ -268,7 +247,8 @@ with samples_master.open(newline="") as fh:
             macs3_peaks_q05 = ""
             macs3_peaks_q01 = ""
             frip_idr = ""
-            frip_consensus = ""
+            frip_consensus_q001 = ""
+            frip_consensus_q005 = ""
 
         out = [
             na(sample_id),
@@ -288,7 +268,8 @@ with samples_master.open(newline="") as fh:
             na(macs3_peaks_q05),
             na(macs3_peaks_q01),
             na(frip_idr),
-            na(frip_consensus),
+            na(frip_consensus_q001),
+            na(frip_consensus_q005),
         ]
         print("\\t".join(out))
 PY

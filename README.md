@@ -34,11 +34,12 @@ Also generates:
 - retained unique read count after `MAPQ >= 4` filtering from `nf-chipfilter`
 - MACS3 peak counts from:
   - `idr_q0.1`
-  - `qc_q0.05`
+  - `consensus_q0.05`
   - `strict_q0.01`
 - FRiP values from:
   - `idr`
-  - `consensus`
+  - `consensus_q0.01`
+  - `consensus_q0.05`
 
 Missing values are written as `NA`, so it is clear when a metric is not available or not applicable (for example control/input samples do not have MACS3 peak counts or FRiP values).
 
