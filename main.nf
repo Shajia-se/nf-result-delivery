@@ -96,10 +96,6 @@ process result_delivery {
   copy_if_exists "${params.multiqc_out}/multiqc_report.html" "\$dest/09_MultiQC"
 
   # 08 Summary
-  cat > "\$dest/08_Summary/qc_master_table.sample.tsv" << 'TSV'
-sample_id	condition	replicate	library_type	is_control	control_id	raw_reads	mapped_reads	pct_mapped_reads	mapped_reads_dedup	pct_duplicates	unique_reads_mapq4	pct_reads_used_mapq4_of_raw	macs3_peaks_q0.1	macs3_peaks_q0.01	frip_idr	frip_consensus
-TSV
-
   cat > "\$dest/08_Summary/qc_master_table.dictionary.tsv" << 'TSV'
 column	description	source_module	source_file_or_logic
 sample_id	Sample identifier from samples_master	nextflow-chipseq	samples_master.csv
@@ -124,7 +120,6 @@ TSV
   python3 - <<'PY' > "\$dest/08_Summary/qc_master_table.sample.tsv.tmp"
 import csv
 import json
-import os
 import re
 import subprocess
 from pathlib import Path
@@ -143,8 +138,7 @@ header = [
     "unique_reads_mapq4", "pct_reads_used_mapq4_of_raw", "macs3_peaks_q0.1", "macs3_peaks_q0.01",
     "frip_idr", "frip_consensus"
 ]
-print("\t".join(header))
-
+print("\\t".join(header))
 def read_fastp_raw_reads(sample_id):
     p = fastp_out / f"{sample_id}.fastp.json"
     if not p.exists():
@@ -285,8 +279,7 @@ with samples_master.open(newline="") as fh:
         print("\\t".join(out))
 PY
 
-  cat "\$dest/08_Summary/qc_master_table.sample.tsv.tmp" >> "\$dest/08_Summary/qc_master_table.sample.tsv"
-  rm -f "\$dest/08_Summary/qc_master_table.sample.tsv.tmp"
+  mv "\$dest/08_Summary/qc_master_table.sample.tsv.tmp" "\$dest/08_Summary/qc_master_table.sample.tsv"
 
   cat > "\$dest/08_Summary/final_summary.tsv" << 'TSV'
 level\tsample_or_group\tcondition\treplicate\tfrip\tidr_peak_count\tdiffbind_sig_count\tdiffbind_unique_up_count\tdiffbind_unique_down_count\ttop_motif_1\ttop_motif_2\ttop_annotation_1\ttop_annotation_2\tnotes
@@ -295,7 +288,7 @@ TSV
   shopt -s nullglob
   for f in ${params.frip_out}/*.frip.tsv; do
     sample=\$(awk 'NR==2{print \$1}' "\$f")
-    frip=\$(awk 'NR==2{print \$6}' "\$f")
+    frip=\$(awk 'NR==2{print \$7}' "\$f")
     cond="NA"
     [[ "\$sample" == WT* ]] && cond="WT"
     [[ "\$sample" == TG* ]] && cond="TG"

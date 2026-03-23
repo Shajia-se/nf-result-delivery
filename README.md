@@ -18,8 +18,28 @@ Builds `final_delivery_<YYYYMMDD>` and organizes outputs into:
 
 Also generates:
 
+- `08_Summary/qc_master_table.sample.tsv`
+- `08_Summary/qc_master_table.dictionary.tsv`
 - `08_Summary/final_summary.tsv`
 - `08_Summary/README_result_notes.md`
+
+## QC Master Table
+
+`qc_master_table.sample.tsv` provides one row per enabled sample and collects core sample-level QC from upstream modules:
+
+- sample metadata from `samples_master.csv`
+- raw read count from `nf-fastp` (`.fastp.json`)
+- mapped read count and mapping rate from `nf-bwa` (`.bam.stat`)
+- duplicate percentage and deduplicated mapped read count from `nf-picard`
+- retained unique read count after `MAPQ >= 4` filtering from `nf-chipfilter`
+- MACS3 peak counts from:
+  - `idr_q0.1`
+  - `strict_q0.01`
+- FRiP values from:
+  - `idr`
+  - `consensus`
+
+`qc_master_table.dictionary.tsv` explains each column and where it comes from.
 
 ## Delivery Levels
 
