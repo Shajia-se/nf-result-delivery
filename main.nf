@@ -313,6 +313,20 @@ if not universe_bed.exists():
 
 universe_label = "universe_" + universe_profile.replace("consensus_", "")
 
+def resolve_exe(name):
+    candidates = [
+        shutil.which(name),
+        f"/usr/local/bin/{name}",
+        f"/usr/bin/{name}",
+        f"/bin/{name}",
+    ]
+    for c in candidates:
+        if c and Path(c).exists():
+            return c
+    raise SystemExit(f"Executable not found in task environment: {name}")
+
+bedtools_bin = resolve_exe("bedtools")
+
 sample_rows = []
 with samples_master.open(newline="") as fh:
     reader = csv.DictReader(fh)
@@ -351,7 +365,7 @@ if not sample_rows:
     raise SystemExit("No enabled non-control clean BAM files found for peak universe matrix")
 
 multicov_out = subprocess.check_output(
-    [shutil.which("bedtools") or "/usr/local/bin/bedtools", "multicov", "-bams", *[str(x["bam"]) for x in sample_rows], "-bed", str(universe_bed)],
+    [bedtools_bin, "multicov", "-bams", *[str(x["bam"]) for x in sample_rows], "-bed", str(universe_bed)],
     text=True
 )
 
@@ -425,7 +439,7 @@ def load_annotation_rows():
 
     try:
         intersect = subprocess.check_output(
-            [shutil.which("bedtools") or "/usr/local/bin/bedtools", "intersect", "-a", str(universe4), "-b", str(fallback4), "-wa", "-wb"],
+            [bedtools_bin, "intersect", "-a", str(universe4), "-b", str(fallback4), "-wa", "-wb"],
             text=True
         )
         for line in intersect.splitlines():
