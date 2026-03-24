@@ -4,23 +4,16 @@ Delivery packager module for ChIP-seq workflow outputs.
 
 ## What it does
 
-Builds `final_delivery_<YYYYMMDD>` and organizes outputs into:
+Builds `final_delivery_<YYYYMMDD>` and now keeps only:
 
-- `01_QC_FRiP`
-- `02_Peaks_IDR`
-- `03_DiffBind`
-- `04_DeepTools`
-- `05_Motif_HOMER`
-- `06_Annotation_ChIPseeker`
-- `07_BrowserTracks`
 - `08_Summary`
-- `09_MultiQC`
 
 Also generates:
 
 - `08_Summary/qc_master_table.sample.tsv`
 - `08_Summary/qc_master_table.dictionary.tsv`
-- `08_Summary/peak_universe_matrix.<profile>.tsv`
+- `08_Summary/peak_universe_matrix.consensus_first_universe_peaks.tsv`
+- `08_Summary/peak_universe_matrix.union_first_universe_peaks.tsv`
 - `08_Summary/peak_universe_matrix.dictionary.tsv`
 - `08_Summary/README_result_notes.md`
 
@@ -48,38 +41,37 @@ Missing values are written as `NA`, so it is clear when a metric is not availabl
 
 ## Exploratory Peak Universe Matrix
 
-`peak_universe_matrix.<profile>.tsv` is an exploratory matrix built from a broad peak universe:
+`nf-result-delivery` now writes two exploratory matrices:
 
-- universe source: `nf-peak-consensus/peak_consensus_output/consensus_q0.05/universe_peaks.bed`
+- `peak_universe_matrix.consensus_first_universe_peaks.tsv`
+  - universe source: `nf-peak-consensus/peak_consensus_output/consensus_q0.05/consensus_first_universe_peaks.bed`
+- `peak_universe_matrix.union_first_universe_peaks.tsv`
+  - universe source: `nf-peak-consensus/peak_consensus_output/consensus_q0.05/union_first_universe_peaks.bed`
+
+Common logic for both matrices:
 - sample-level raw counts: `bedtools multicov` on `nf-chipfilter/chipfilter_output/*.clean.bam`
 - sample-level normalized values: CPM using `unique_reads_mapq4` as denominator
 - condition-level `0/1` columns: derived from overlap with `<condition>_consensus.bed`
 - annotation:
-  - preferred: direct `ChIPseeker` annotation of `universe_q0.05`
+  - preferred: direct `ChIPseeker` annotation of the matching universe BED
   - fallback: overlap-based annotation transfer from `consensus_q0.05` annotated peaks
 
-This table is intended for exploratory downstream work by collaborators. It is broader and more permissive than the strict consensus sets used for some primary analyses.
+These tables are intended for exploratory downstream work by collaborators. The `consensus_first` version is the default higher-confidence exploratory view; the `union_first` version is broader and more permissive.
 
 ## Delivery Levels
 
 - `lean` (default): compact delivery package, excludes larger files (`.bw`, deepTools matrix tables)
 - `full`: includes browser tracks (`.bw`) and deepTools matrix tables
 
-This module copies selected files into a clean final folder (not symlink mode), so package size depends on included file types.
+This module now focuses on summary tables only. Earlier versions also copied selected downstream result files, but those folders were often incomplete or uneven across WT/TG and were therefore removed from the delivery package to keep the output clearer.
 
 ## Run on HPC
 
-Default (lean, no extra parameter required):
+Default:
 
 ```bash
 cd /ictstr01/groups/idc/projects/uhlenhaut/jiang/pipelines/nf-result-delivery
 nextflow run main.nf -profile hpc
-```
-
-Full package:
-
-```bash
-nextflow run main.nf -profile hpc --delivery_level full
 ```
 
 Optional custom tag:

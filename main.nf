@@ -24,76 +24,7 @@ process result_delivery {
   set -euo pipefail
 
   dest="${delivery_name}"
-  level="${delivery_level}"
-
-  mkdir -p "\$dest"/{01_QC_FRiP,02_Peaks_IDR,03_DiffBind,04_DeepTools,05_Motif_HOMER,06_Annotation_ChIPseeker,07_BrowserTracks,08_Summary,09_MultiQC}
-
-  copy_if_exists() {
-    local src="\$1"
-    local dst="\$2"
-    [[ -f "\$src" ]] && cp -f "\$src" "\$dst/" || true
-  }
-
-  copy_glob() {
-    local pattern="\$1"
-    local dst="\$2"
-    shopt -s nullglob
-    for f in \$pattern; do
-      cp -f "\$f" "\$dst/"
-    done
-    shopt -u nullglob
-  }
-
-  # 01 FRiP
-  copy_glob "${params.frip_out}/*.frip.tsv" "\$dest/01_QC_FRiP"
-
-  # 02 IDR
-  copy_glob "${params.idr_out}/*_idr.sorted.chr.narrowPeak" "\$dest/02_Peaks_IDR"
-  copy_glob "${params.idr_out}/*_idr.txt" "\$dest/02_Peaks_IDR"
-  copy_glob "${params.idr_out}/*_idr.log" "\$dest/02_Peaks_IDR"
-  copy_glob "${params.idr_out}/*_idr.txt.png" "\$dest/02_Peaks_IDR"
-
-  # 03 DiffBind
-  copy_if_exists "${params.diffbind_out}/01_general_QC.pdf" "\$dest/03_DiffBind"
-  copy_glob "${params.diffbind_out}/02_*.pdf" "\$dest/03_DiffBind"
-  copy_glob "${params.diffbind_out}/significant.*.tsv" "\$dest/03_DiffBind"
-  copy_glob "${params.diffbind_out}/all_peaks.*.tsv" "\$dest/03_DiffBind"
-  copy_glob "${params.diffbind_out}/condition_unique_*.bed" "\$dest/03_DiffBind"
-  copy_if_exists "${params.diffbind_out}/diffbind_summary.tsv" "\$dest/03_DiffBind"
-  copy_if_exists "${params.diffbind_out}/peak_universe_upset_input.tsv" "\$dest/03_DiffBind"
-  copy_if_exists "${params.diffbind_out}/peak_universe_condition_sizes.tsv" "\$dest/03_DiffBind"
-  copy_if_exists "${params.diffbind_out}/peak_universe_pairwise_overlap.tsv" "\$dest/03_DiffBind"
-
-  # 04 deepTools
-  copy_glob "${params.deeptools_out}/*/*.heatmap.png" "\$dest/04_DeepTools"
-  copy_glob "${params.deeptools_out}/*/*.heatmap.pdf" "\$dest/04_DeepTools"
-  copy_glob "${params.deeptools_out}/*/*.profile.png" "\$dest/04_DeepTools"
-  copy_glob "${params.deeptools_out}/*/*.profile.pdf" "\$dest/04_DeepTools"
-
-  # full mode only: larger intermediate tables
-  if [[ "\$level" == "full" ]]; then
-    copy_glob "${params.deeptools_out}/*/*.matrix.tab" "\$dest/04_DeepTools"
-  fi
-
-  # 05 HOMER motif
-  copy_glob "${params.homer_out}/motif/*_motifs/knownResults.txt" "\$dest/05_Motif_HOMER"
-  copy_glob "${params.homer_out}/motif/*_motifs/homerResults.html" "\$dest/05_Motif_HOMER"
-  copy_glob "${params.homer_out}/motif_compare/*_motifs/knownResults.txt" "\$dest/05_Motif_HOMER"
-  copy_glob "${params.homer_out}/motif_compare/*_motifs/homerResults.html" "\$dest/05_Motif_HOMER"
-
-  # 06 ChIPseeker
-  copy_if_exists "${params.chipseeker_out}/annotated_master_table.tsv" "\$dest/06_Annotation_ChIPseeker"
-  copy_if_exists "${params.chipseeker_out}/annotated_master_table.xlsx" "\$dest/06_Annotation_ChIPseeker"
-  copy_if_exists "${params.chipseeker_out}/annotation_summary.by_sample.tsv" "\$dest/06_Annotation_ChIPseeker"
-  copy_if_exists "${params.chipseeker_out}/annotation_summary.by_sample.pdf" "\$dest/06_Annotation_ChIPseeker"
-
-  # 07 Browser tracks (full mode only; usually large)
-  if [[ "\$level" == "full" ]]; then
-    copy_glob "${params.bw_out}/*.bw" "\$dest/07_BrowserTracks"
-  fi
-
-  # 09 MultiQC
-  copy_if_exists "${params.multiqc_out}/multiqc_report.html" "\$dest/09_MultiQC"
+  mkdir -p "\$dest/08_Summary"
 
   # 08 Summary
   cat > "\$dest/08_Summary/qc_master_table.dictionary.tsv" << 'TSV'
@@ -122,9 +53,9 @@ TSV
   cat > "\$dest/08_Summary/peak_universe_matrix.dictionary.tsv" << TSV
 column	description	source_module	source_file_or_logic
 peak_id	Peak universe row identifier	nf-result-delivery	Sequential ID PU_1..PU_n
-chr	Chromosome of universe peak	nf-peak-consensus	${params.peak_consensus_out}/${params.exploratory_universe_profile}/universe_peaks.bed
-start	0-based start coordinate of universe peak	nf-peak-consensus	universe_peaks.bed
-end	1-based end coordinate of universe peak	nf-peak-consensus	universe_peaks.bed
+chr	Chromosome of universe peak	nf-peak-consensus	${params.peak_consensus_out}/${params.exploratory_universe_profile}/${params.consensus_first_universe_file} or ${params.union_first_universe_file}
+start	0-based start coordinate of universe peak	nf-peak-consensus	Universe BED coordinates
+end	1-based end coordinate of universe peak	nf-peak-consensus	Universe BED coordinates
 length	Peak width in bp	nf-result-delivery	end - start
 <condition>	Condition-level reproducible peak flag	nf-result-delivery	1 if universe peak overlaps <condition>_consensus.bed, else 0
 raw_<sample>	Raw fragment/read count in universe peak for sample	nf-result-delivery	bedtools multicov on chipfilter_output/<sample>.clean.bam
@@ -292,9 +223,8 @@ PY
 
   mv "\$dest/08_Summary/qc_master_table.sample.tsv.tmp" "\$dest/08_Summary/qc_master_table.sample.tsv"
 
-  python3 - <<'PY' > "\$dest/08_Summary/peak_universe_matrix.${params.exploratory_universe_profile}.tsv.tmp"
+  python3 - <<'PY'
 import csv
-import os
 import subprocess
 from pathlib import Path
 from collections import OrderedDict
@@ -304,13 +234,14 @@ chipfilter_out = Path("${params.chipfilter_out}")
 chipseeker_out = Path("${params.chipseeker_out}")
 peak_consensus_out = Path("${params.peak_consensus_out}")
 universe_profile = "${params.exploratory_universe_profile}"
-presence_threshold = float("${params.exploratory_presence_cpm_threshold}")
+consensus_first_file = "${params.consensus_first_universe_file}"
+union_first_file = "${params.union_first_universe_file}"
+dest = Path("${delivery_name}") / "08_Summary"
 
-universe_bed = peak_consensus_out / universe_profile / "universe_peaks.bed"
-if not universe_bed.exists():
-    raise SystemExit(f"Universe BED not found: {universe_bed}")
-
-universe_label = "universe_" + universe_profile.replace("consensus_", "")
+universe_specs = [
+    ("consensus_first_universe_peaks", peak_consensus_out / universe_profile / consensus_first_file),
+    ("union_first_universe_peaks", peak_consensus_out / universe_profile / union_first_file),
+]
 
 sample_rows = []
 with samples_master.open(newline="") as fh:
@@ -354,32 +285,13 @@ for row in sample_rows:
     if row["condition"] and row["condition"] not in conditions:
         conditions.append(row["condition"])
 
-consensus_presence = OrderedDict()
-for cond in conditions:
-    consensus_bed = peak_consensus_out / universe_profile / f"{cond}_consensus.bed"
-    if not consensus_bed.exists():
-        consensus_presence[cond] = set()
-        continue
-    intersect = subprocess.check_output(
-        ["bedtools", "intersect", "-a", str(universe_bed), "-b", str(consensus_bed), "-wa"],
-        text=True
-    )
-    overlap_keys = set()
-    for line in intersect.splitlines():
-        parts = line.rstrip().split("\\t")
-        if len(parts) >= 3:
-            overlap_keys.add((parts[0], parts[1], parts[2]))
-    consensus_presence[cond] = overlap_keys
-
-multicov_out = subprocess.check_output(
-    ["bedtools", "multicov", "-bams", *[str(x["bam"]) for x in sample_rows], "-bed", str(universe_bed)],
-    text=True
-)
-
-def load_annotation_rows():
+def load_annotation_rows(universe_bed):
     ann = {}
+    universe_stem = universe_bed.stem
+    universe_label = "universe_" + universe_profile.replace("consensus_", "")
 
-    direct = chipseeker_out / f"{universe_label}__universe_peaks" / f"annotated_peaks.{universe_label}__universe_peaks.tsv"
+    direct_dir = f"{universe_label}__{universe_stem}"
+    direct = chipseeker_out / direct_dir / f"annotated_peaks.{direct_dir}.tsv"
     if direct.exists():
         with direct.open(newline="") as fh:
             reader = csv.DictReader(fh, delimiter="\\t")
@@ -394,7 +306,7 @@ def load_annotation_rows():
                     "gene_id": (row.get("geneId") or row.get("gene_id") or "").strip(),
                     "gene_name": (row.get("SYMBOL") or row.get("gene_name") or "").strip(),
                     "distance_to_tss": (row.get("distanceToTSS") or "").strip(),
-                    "annotation_source": universe_label
+                    "annotation_source": direct_dir
                 }
         return ann
 
@@ -471,87 +383,105 @@ def load_annotation_rows():
                 pass
     return ann
 
-ann_map = load_annotation_rows()
-
-header = ["peak_id", "chr", "start", "end", "length"] + conditions
-header += [f"raw_{row['sample_id']}" for row in sample_rows]
-header += [f"cpm_{row['sample_id']}" for row in sample_rows]
-header += ["annotation", "gene_id", "gene_name", "distance_to_tss", "annotation_source"]
-print("\\t".join(header))
-
-for idx, line in enumerate(multicov_out.splitlines(), start=1):
-    parts = line.rstrip().split("\\t")
-    if len(parts) < 3 + len(sample_rows):
+for matrix_name, universe_bed in universe_specs:
+    if not universe_bed.exists():
         continue
-    chrom, start, end = parts[:3]
-    counts = []
-    for x in parts[3:3 + len(sample_rows)]:
-        try:
-            counts.append(int(float(x)))
-        except Exception:
-            counts.append(0)
-    cpms = []
-    for count, sample in zip(counts, sample_rows):
-        usable = sample["usable_reads"]
-        if usable and usable > 0:
-            cpms.append((count / usable) * 1_000_000.0)
-        else:
-            cpms.append(None)
 
-    key = (chrom, start, end)
-    cond_presence = OrderedDict()
+    consensus_presence = OrderedDict()
     for cond in conditions:
-        cond_presence[cond] = "1" if key in consensus_presence.get(cond, set()) else "0"
+        consensus_bed = peak_consensus_out / universe_profile / f"{cond}_consensus.bed"
+        if not consensus_bed.exists():
+            consensus_presence[cond] = set()
+            continue
+        intersect = subprocess.check_output(
+            ["bedtools", "intersect", "-a", str(universe_bed), "-b", str(consensus_bed), "-wa"],
+            text=True
+        )
+        overlap_keys = set()
+        for line in intersect.splitlines():
+            parts = line.rstrip().split("\\t")
+            if len(parts) >= 3:
+                overlap_keys.add((parts[0], parts[1], parts[2]))
+        consensus_presence[cond] = overlap_keys
 
-    ann = ann_map.get(key, {})
-    row = [
-        f"PU_{idx}",
-        chrom,
-        start,
-        end,
-        str(int(end) - int(start))
-    ]
-    row += [cond_presence[c] for c in conditions]
-    row += [str(x) for x in counts]
-    row += [f"{x:.4f}" if x is not None else "NA" for x in cpms]
-    row += [
-        ann.get("annotation", "NA") or "NA",
-        ann.get("gene_id", "NA") or "NA",
-        ann.get("gene_name", "NA") or "NA",
-        ann.get("distance_to_tss", "NA") or "NA",
-        ann.get("annotation_source", "NA") or "NA",
-    ]
-    print("\\t".join(row))
+    multicov_out = subprocess.check_output(
+        ["bedtools", "multicov", "-bams", *[str(x["bam"]) for x in sample_rows], "-bed", str(universe_bed)],
+        text=True
+    )
+
+    ann_map = load_annotation_rows(universe_bed)
+
+    out_path = dest / f"peak_universe_matrix.{matrix_name}.tsv"
+    with out_path.open("w") as out_fh:
+        header = ["peak_id", "chr", "start", "end", "length"] + conditions
+        header += [f"raw_{row['sample_id']}" for row in sample_rows]
+        header += [f"cpm_{row['sample_id']}" for row in sample_rows]
+        header += ["annotation", "gene_id", "gene_name", "distance_to_tss", "annotation_source"]
+        out_fh.write("\\t".join(header) + "\\n")
+
+        for idx, line in enumerate(multicov_out.splitlines(), start=1):
+            parts = line.rstrip().split("\\t")
+            if len(parts) < 3 + len(sample_rows):
+                continue
+            chrom, start, end = parts[:3]
+            counts = []
+            for x in parts[3:3 + len(sample_rows)]:
+                try:
+                    counts.append(int(float(x)))
+                except Exception:
+                    counts.append(0)
+            cpms = []
+            for count, sample in zip(counts, sample_rows):
+                usable = sample["usable_reads"]
+                if usable and usable > 0:
+                    cpms.append((count / usable) * 1_000_000.0)
+                else:
+                    cpms.append(None)
+
+            key = (chrom, start, end)
+            cond_presence = OrderedDict()
+            for cond in conditions:
+                cond_presence[cond] = "1" if key in consensus_presence.get(cond, set()) else "0"
+
+            ann = ann_map.get(key, {})
+            row = [
+                f"PU_{idx}",
+                chrom,
+                start,
+                end,
+                str(int(end) - int(start))
+            ]
+            row += [cond_presence[c] for c in conditions]
+            row += [str(x) for x in counts]
+            row += [f"{x:.4f}" if x is not None else "NA" for x in cpms]
+            row += [
+                ann.get("annotation", "NA") or "NA",
+                ann.get("gene_id", "NA") or "NA",
+                ann.get("gene_name", "NA") or "NA",
+                ann.get("distance_to_tss", "NA") or "NA",
+                ann.get("annotation_source", "NA") or "NA",
+            ]
+            out_fh.write("\\t".join(row) + "\\n")
 PY
-
-  mv "\$dest/08_Summary/peak_universe_matrix.${params.exploratory_universe_profile}.tsv.tmp" "\$dest/08_Summary/peak_universe_matrix.${params.exploratory_universe_profile}.tsv"
 
   cat > "\$dest/08_Summary/README_result_notes.md" << MD
 # Final Delivery Notes
 
-- Delivery level: ${delivery_level}
-- `lean`: excludes large browser tracks (`.bw`) and deepTools matrix tables.
-- `full`: includes browser tracks and deepTools matrix tables.
+- This delivery package now keeps only summary-level outputs.
+- Downstream folders such as deepTools, HOMER, and ChIPseeker were removed from delivery packaging because partial or uneven content was more confusing than helpful.
 - If batch and condition are confounded, interpret differential results as exploratory.
-- `peak_universe_matrix.${params.exploratory_universe_profile}.tsv` uses `${params.exploratory_universe_profile}/universe_peaks.bed` as a broad exploratory universe.
-- Sample-level counts in the peak universe matrix are raw counts from `bedtools multicov` on `chipfilter_output/*.clean.bam`.
+- `peak_universe_matrix.consensus_first_universe_peaks.tsv` uses `${params.exploratory_universe_profile}/${params.consensus_first_universe_file}`.
+- `peak_universe_matrix.union_first_universe_peaks.tsv` uses `${params.exploratory_universe_profile}/${params.union_first_universe_file}`.
+- Sample-level counts in both peak universe matrices are raw counts from `bedtools multicov` on `chipfilter_output/*.clean.bam`.
 - Condition-level 0/1 columns are derived from overlap with `${params.exploratory_universe_profile}/<condition>_consensus.bed`.
 MD
 
   cat > "\$dest/README.md" << 'MD'
 # Final Delivery Package
 
-This folder contains organized final deliverables:
+This folder contains summary-level deliverables only:
 
-- 01_QC_FRiP
-- 02_Peaks_IDR
-- 03_DiffBind
-- 04_DeepTools
-- 05_Motif_HOMER
-- 06_Annotation_ChIPseeker
-- 07_BrowserTracks
 - 08_Summary
-- 09_MultiQC
 MD
   """
 }
