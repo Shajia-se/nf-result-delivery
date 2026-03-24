@@ -332,7 +332,7 @@ with samples_master.open(newline="") as fh:
         if stat_tsv.exists():
             rows = stat_tsv.read_text().strip().splitlines()
             if len(rows) >= 2:
-                vals = rows[1].split("\t")
+                vals = rows[1].split("\\t")
                 if len(vals) > 3 and vals[3]:
                     try:
                         usable_reads = float(vals[3])
@@ -360,7 +360,7 @@ def load_annotation_rows():
     direct = chipseeker_out / f"{universe_label}__universe_peaks" / f"annotated_peaks.{universe_label}__universe_peaks.tsv"
     if direct.exists():
         with direct.open(newline="") as fh:
-            reader = csv.DictReader(fh, delimiter="\t")
+            reader = csv.DictReader(fh, delimiter="\\t")
             for row in reader:
                 key = (
                     str(row.get("seqnames", "")).strip(),
@@ -382,7 +382,7 @@ def load_annotation_rows():
         if not f.exists():
             continue
         with f.open(newline="") as fh:
-            reader = csv.DictReader(fh, delimiter="\t")
+            reader = csv.DictReader(fh, delimiter="\\t")
             for row in reader:
                 seq = str(row.get("seqnames", "")).strip()
                 start = str(row.get("start", "")).strip()
@@ -408,19 +408,19 @@ def load_annotation_rows():
     with universe4.open("w") as fh:
         with universe_bed.open() as ub:
             for idx, line in enumerate(ub, start=1):
-                parts = line.rstrip().split("\t")
+                parts = line.rstrip().split("\\t")
                 if len(parts) < 3:
                     continue
-                fh.write("\t".join(parts[:3] + [f"PU_{idx}"]) + "\n")
+                fh.write("\\t".join(parts[:3] + [f"PU_{idx}"]) + "\\n")
     with fallback4.open("w") as fh:
         for idx, row in enumerate(fallback_rows, start=1):
             meta = "|".join([
-                row["annotation"].replace("\t", " "),
-                row["gene_id"].replace("\t", " "),
-                row["gene_name"].replace("\t", " "),
-                row["distance_to_tss"].replace("\t", " "),
+                row["annotation"].replace("\\t", " "),
+                row["gene_id"].replace("\\t", " "),
+                row["gene_name"].replace("\\t", " "),
+                row["distance_to_tss"].replace("\\t", " "),
             ])
-            fh.write("\t".join([row["seq"], row["start"], row["end"], f"FB_{idx}", meta]) + "\n")
+            fh.write("\\t".join([row["seq"], row["start"], row["end"], f"FB_{idx}", meta]) + "\\n")
 
     try:
         intersect = subprocess.check_output(
@@ -428,7 +428,7 @@ def load_annotation_rows():
             text=True
         )
         for line in intersect.splitlines():
-            parts = line.rstrip().split("\t")
+            parts = line.rstrip().split("\\t")
             if len(parts) < 9:
                 continue
             key = (parts[0], parts[1], parts[2])
@@ -460,10 +460,10 @@ header = ["peak_id", "chr", "start", "end", "length"] + conditions
 header += [f"raw_{row['sample_id']}" for row in sample_rows]
 header += [f"cpm_{row['sample_id']}" for row in sample_rows]
 header += ["annotation", "gene_id", "gene_name", "distance_to_tss", "annotation_source"]
-print("\t".join(header))
+print("\\t".join(header))
 
 for idx, line in enumerate(multicov_out.splitlines(), start=1):
-    parts = line.rstrip().split("\t")
+    parts = line.rstrip().split("\\t")
     if len(parts) < 3 + len(sample_rows):
         continue
     chrom, start, end = parts[:3]
@@ -504,7 +504,7 @@ for idx, line in enumerate(multicov_out.splitlines(), start=1):
         ann.get("distance_to_tss", "NA") or "NA",
         ann.get("annotation_source", "NA") or "NA",
     ]
-    print("\t".join(row))
+    print("\\t".join(row))
 PY
 
   mv "\$dest/08_Summary/peak_universe_matrix.${params.exploratory_universe_profile}.tsv.tmp" "\$dest/08_Summary/peak_universe_matrix.${params.exploratory_universe_profile}.tsv"
