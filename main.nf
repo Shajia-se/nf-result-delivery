@@ -119,11 +119,27 @@ frip_consensus_q0.01	FRiP using strict_q0.01 consensus peaks	nf-frip	<sample>.co
 frip_consensus_q0.05	FRiP using consensus_q0.05 peaks	nf-frip	<sample>.consensus_q0.05.frip.tsv FRiP column
 TSV
 
+  cat > "\$dest/08_Summary/peak_universe_matrix.dictionary.tsv" << TSV
+column	description	source_module	source_file_or_logic
+peak_id	Peak universe row identifier	nf-result-delivery	Sequential ID PU_1..PU_n
+chr	Chromosome of universe peak	nf-peak-consensus	${params.peak_consensus_out}/${params.exploratory_universe_profile}/universe_peaks.bed
+start	0-based start coordinate of universe peak	nf-peak-consensus	universe_peaks.bed
+end	1-based end coordinate of universe peak	nf-peak-consensus	universe_peaks.bed
+length	Peak width in bp	nf-result-delivery	end - start
+<condition>	Condition-level presence/absence from normalized signal	nf-result-delivery	1 if any sample in condition has CPM >= ${params.exploratory_presence_cpm_threshold}, else 0
+raw_<sample>	Raw fragment/read count in universe peak for sample	nf-result-delivery	bedtools multicov on chipfilter_output/<sample>.clean.bam
+cpm_<sample>	Counts per million normalized by unique_reads_mapq4	nf-result-delivery	raw_<sample> / unique_reads_mapq4 * 1e6
+annotation	Peak annotation label	nf-chipseeker / nf-result-delivery	Preferred from universe_q0.05 annotation, fallback from overlapping consensus_q0.05 annotation
+gene_id	Nearest/annotated gene identifier	nf-chipseeker / nf-result-delivery	Preferred from universe_q0.05 annotation, fallback from overlapping consensus_q0.05 annotation
+gene_name	Nearest/annotated gene symbol	nf-chipseeker / nf-result-delivery	Preferred from universe_q0.05 annotation, fallback from overlapping consensus_q0.05 annotation
+distance_to_tss	Distance from peak to TSS when available	nf-chipseeker / nf-result-delivery	Preferred from universe_q0.05 annotation, fallback from overlapping consensus_q0.05 annotation
+annotation_source	Where annotation row came from	nf-result-delivery	universe_q0.05 direct or consensus_q0.05 overlap fallback
+TSV
+
   python3 - <<'PY' > "\$dest/08_Summary/qc_master_table.sample.tsv.tmp"
 import csv
 import json
 import re
-import subprocess
 from pathlib import Path
 
 samples_master = Path("${params.samples_master}")
@@ -276,25 +292,222 @@ PY
 
   mv "\$dest/08_Summary/qc_master_table.sample.tsv.tmp" "\$dest/08_Summary/qc_master_table.sample.tsv"
 
-  cat > "\$dest/08_Summary/final_summary.tsv" << 'TSV'
-level\tsample_or_group\tcondition\treplicate\tfrip\tidr_peak_count\tdiffbind_sig_count\tdiffbind_unique_up_count\tdiffbind_unique_down_count\ttop_motif_1\ttop_motif_2\ttop_annotation_1\ttop_annotation_2\tnotes
-TSV
+  python3 - <<'PY' > "\$dest/08_Summary/peak_universe_matrix.${params.exploratory_universe_profile}.tsv.tmp"
+import csv
+import os
+import subprocess
+from pathlib import Path
+from collections import OrderedDict
 
-  shopt -s nullglob
-  for f in ${params.frip_out}/*.frip.tsv; do
-    sample=\$(awk 'NR==2{print \$1}' "\$f")
-    frip=\$(awk 'NR==2{print \$7}' "\$f")
-    cond="NA"
-    [[ "\$sample" == WT* ]] && cond="WT"
-    [[ "\$sample" == TG* ]] && cond="TG"
-    printf "sample\t%s\t%s\tNA\t%s\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\t\n" "\$sample" "\$cond" "\$frip" >> "\$dest/08_Summary/final_summary.tsv"
-  done
-  shopt -u nullglob
+samples_master = Path("${params.samples_master}")
+chipfilter_out = Path("${params.chipfilter_out}")
+chipseeker_out = Path("${params.chipseeker_out}")
+peak_consensus_out = Path("${params.peak_consensus_out}")
+universe_profile = "${params.exploratory_universe_profile}"
+presence_threshold = float("${params.exploratory_presence_cpm_threshold}")
 
-  if [[ -f "${params.diffbind_out}/diffbind_summary.tsv" ]]; then
-    awk 'NR>1{printf "contrast\t%s\tNA\tNA\tNA\tNA\t%s\t%s\t%s\tNA\tNA\tNA\tNA\tExploratory if batch confounded\\n",\$1,\$3,\$4,\$5}' \
-      "${params.diffbind_out}/diffbind_summary.tsv" >> "\$dest/08_Summary/final_summary.tsv" || true
-  fi
+universe_bed = peak_consensus_out / universe_profile / "universe_peaks.bed"
+if not universe_bed.exists():
+    raise SystemExit(f"Universe BED not found: {universe_bed}")
+
+universe_label = "universe_" + universe_profile.replace("consensus_", "")
+
+sample_rows = []
+with samples_master.open(newline="") as fh:
+    reader = csv.DictReader(fh)
+    for row in reader:
+        enabled = (row.get("enabled") or "").strip().lower()
+        if enabled not in ("", "true"):
+            continue
+        if (row.get("is_control") or "").strip().lower() == "true":
+            continue
+        sample_id = (row.get("sample_id") or "").strip()
+        condition = (row.get("condition") or "").strip()
+        replicate = (row.get("replicate") or "").strip()
+        clean_bam = chipfilter_out / f"{sample_id}.clean.bam"
+        stat_tsv = chipfilter_out / f"{sample_id}.chipfilter.stats.tsv"
+        if not clean_bam.exists():
+            continue
+        usable_reads = None
+        if stat_tsv.exists():
+            rows = stat_tsv.read_text().strip().splitlines()
+            if len(rows) >= 2:
+                vals = rows[1].split("\t")
+                if len(vals) > 3 and vals[3]:
+                    try:
+                        usable_reads = float(vals[3])
+                    except Exception:
+                        usable_reads = None
+        sample_rows.append({
+            "sample_id": sample_id,
+            "condition": condition,
+            "replicate": replicate,
+            "bam": clean_bam,
+            "usable_reads": usable_reads,
+        })
+
+if not sample_rows:
+    raise SystemExit("No enabled non-control clean BAM files found for peak universe matrix")
+
+multicov_out = subprocess.check_output(
+    ["bedtools", "multicov", "-bams", *[str(x["bam"]) for x in sample_rows], "-bed", str(universe_bed)],
+    text=True
+)
+
+def load_annotation_rows():
+    ann = {}
+
+    direct = chipseeker_out / f"{universe_label}__universe_peaks" / f"annotated_peaks.{universe_label}__universe_peaks.tsv"
+    if direct.exists():
+        with direct.open(newline="") as fh:
+            reader = csv.DictReader(fh, delimiter="\t")
+            for row in reader:
+                key = (
+                    str(row.get("seqnames", "")).strip(),
+                    str(row.get("start", "")).strip(),
+                    str(row.get("end", "")).strip(),
+                )
+                ann[key] = {
+                    "annotation": (row.get("annotation") or "").strip(),
+                    "gene_id": (row.get("geneId") or row.get("gene_id") or "").strip(),
+                    "gene_name": (row.get("SYMBOL") or row.get("gene_name") or "").strip(),
+                    "distance_to_tss": (row.get("distanceToTSS") or "").strip(),
+                    "annotation_source": universe_label
+                }
+        return ann
+
+    fallback_rows = []
+    for d in sorted(chipseeker_out.glob("consensus_q0.05__*")):
+        f = d / f"annotated_peaks.{d.name}.tsv"
+        if not f.exists():
+            continue
+        with f.open(newline="") as fh:
+            reader = csv.DictReader(fh, delimiter="\t")
+            for row in reader:
+                seq = str(row.get("seqnames", "")).strip()
+                start = str(row.get("start", "")).strip()
+                end = str(row.get("end", "")).strip()
+                if not seq or not start or not end:
+                    continue
+                fallback_rows.append({
+                    "seq": seq,
+                    "start": start,
+                    "end": end,
+                    "annotation": (row.get("annotation") or "").strip(),
+                    "gene_id": (row.get("geneId") or row.get("gene_id") or "").strip(),
+                    "gene_name": (row.get("SYMBOL") or row.get("gene_name") or "").strip(),
+                    "distance_to_tss": (row.get("distanceToTSS") or "").strip(),
+                })
+
+    if not fallback_rows:
+        return ann
+
+    tmpdir = Path(".")
+    universe4 = tmpdir / "universe.annot.input.bed"
+    fallback4 = tmpdir / "fallback.annot.input.bed"
+    with universe4.open("w") as fh:
+        with universe_bed.open() as ub:
+            for idx, line in enumerate(ub, start=1):
+                parts = line.rstrip().split("\t")
+                if len(parts) < 3:
+                    continue
+                fh.write("\t".join(parts[:3] + [f"PU_{idx}"]) + "\n")
+    with fallback4.open("w") as fh:
+        for idx, row in enumerate(fallback_rows, start=1):
+            meta = "|".join([
+                row["annotation"].replace("\t", " "),
+                row["gene_id"].replace("\t", " "),
+                row["gene_name"].replace("\t", " "),
+                row["distance_to_tss"].replace("\t", " "),
+            ])
+            fh.write("\t".join([row["seq"], row["start"], row["end"], f"FB_{idx}", meta]) + "\n")
+
+    try:
+        intersect = subprocess.check_output(
+            ["bedtools", "intersect", "-a", str(universe4), "-b", str(fallback4), "-wa", "-wb"],
+            text=True
+        )
+        for line in intersect.splitlines():
+            parts = line.rstrip().split("\t")
+            if len(parts) < 9:
+                continue
+            key = (parts[0], parts[1], parts[2])
+            meta = parts[8].split("|")
+            if key not in ann:
+                ann[key] = {
+                    "annotation": meta[0] if len(meta) > 0 else "",
+                    "gene_id": meta[1] if len(meta) > 1 else "",
+                    "gene_name": meta[2] if len(meta) > 2 else "",
+                    "distance_to_tss": meta[3] if len(meta) > 3 else "",
+                    "annotation_source": "consensus_q0.05_overlap"
+                }
+    finally:
+        for p in (universe4, fallback4):
+            try:
+                p.unlink()
+            except Exception:
+                pass
+    return ann
+
+ann_map = load_annotation_rows()
+
+conditions = []
+for row in sample_rows:
+    if row["condition"] and row["condition"] not in conditions:
+        conditions.append(row["condition"])
+
+header = ["peak_id", "chr", "start", "end", "length"] + conditions
+header += [f"raw_{row['sample_id']}" for row in sample_rows]
+header += [f"cpm_{row['sample_id']}" for row in sample_rows]
+header += ["annotation", "gene_id", "gene_name", "distance_to_tss", "annotation_source"]
+print("\t".join(header))
+
+for idx, line in enumerate(multicov_out.splitlines(), start=1):
+    parts = line.rstrip().split("\t")
+    if len(parts) < 3 + len(sample_rows):
+        continue
+    chrom, start, end = parts[:3]
+    counts = []
+    for x in parts[3:3 + len(sample_rows)]:
+        try:
+            counts.append(int(float(x)))
+        except Exception:
+            counts.append(0)
+    cpms = []
+    for count, sample in zip(counts, sample_rows):
+        usable = sample["usable_reads"]
+        if usable and usable > 0:
+            cpms.append((count / usable) * 1_000_000.0)
+        else:
+            cpms.append(None)
+
+    cond_presence = OrderedDict()
+    for cond in conditions:
+        vals = [cpm for cpm, sample in zip(cpms, sample_rows) if sample["condition"] == cond and cpm is not None]
+        cond_presence[cond] = "1" if any(v >= presence_threshold for v in vals) else "0"
+
+    ann = ann_map.get((chrom, start, end), {})
+    row = [
+        f"PU_{idx}",
+        chrom,
+        start,
+        end,
+        str(int(end) - int(start))
+    ]
+    row += [cond_presence[c] for c in conditions]
+    row += [str(x) for x in counts]
+    row += [f"{x:.4f}" if x is not None else "NA" for x in cpms]
+    row += [
+        ann.get("annotation", "NA") or "NA",
+        ann.get("gene_id", "NA") or "NA",
+        ann.get("gene_name", "NA") or "NA",
+        ann.get("distance_to_tss", "NA") or "NA",
+        ann.get("annotation_source", "NA") or "NA",
+    ]
+    print("\t".join(row))
+PY
+
+  mv "\$dest/08_Summary/peak_universe_matrix.${params.exploratory_universe_profile}.tsv.tmp" "\$dest/08_Summary/peak_universe_matrix.${params.exploratory_universe_profile}.tsv"
 
   cat > "\$dest/08_Summary/README_result_notes.md" << MD
 # Final Delivery Notes
@@ -303,6 +516,9 @@ TSV
 - `lean`: excludes large browser tracks (`.bw`) and deepTools matrix tables.
 - `full`: includes browser tracks and deepTools matrix tables.
 - If batch and condition are confounded, interpret differential results as exploratory.
+- `peak_universe_matrix.${params.exploratory_universe_profile}.tsv` uses `${params.exploratory_universe_profile}/universe_peaks.bed` as a broad exploratory universe.
+- Sample-level counts in the peak universe matrix are raw counts from `bedtools multicov` on `chipfilter_output/*.clean.bam`.
+- Condition-level 0/1 columns are derived from CPM normalized by `unique_reads_mapq4` with threshold ${params.exploratory_presence_cpm_threshold}.
 MD
 
   cat > "\$dest/README.md" << 'MD'

@@ -20,7 +20,8 @@ Also generates:
 
 - `08_Summary/qc_master_table.sample.tsv`
 - `08_Summary/qc_master_table.dictionary.tsv`
-- `08_Summary/final_summary.tsv`
+- `08_Summary/peak_universe_matrix.<profile>.tsv`
+- `08_Summary/peak_universe_matrix.dictionary.tsv`
 - `08_Summary/README_result_notes.md`
 
 ## QC Master Table
@@ -44,6 +45,20 @@ Also generates:
 Missing values are written as `NA`, so it is clear when a metric is not available or not applicable (for example control/input samples do not have MACS3 peak counts or FRiP values).
 
 `qc_master_table.dictionary.tsv` explains each column and where it comes from.
+
+## Exploratory Peak Universe Matrix
+
+`peak_universe_matrix.<profile>.tsv` is an exploratory matrix built from a broad peak universe:
+
+- universe source: `nf-peak-consensus/peak_consensus_output/consensus_q0.05/universe_peaks.bed`
+- sample-level raw counts: `bedtools multicov` on `nf-chipfilter/chipfilter_output/*.clean.bam`
+- sample-level normalized values: CPM using `unique_reads_mapq4` as denominator
+- condition-level `0/1` columns: derived from normalized CPM, default threshold `>= 1 CPM`
+- annotation:
+  - preferred: direct `ChIPseeker` annotation of `universe_q0.05`
+  - fallback: overlap-based annotation transfer from `consensus_q0.05` annotated peaks
+
+This table is intended for exploratory downstream work by collaborators. It is broader and more permissive than the strict consensus sets used for some primary analyses.
 
 ## Delivery Levels
 
