@@ -296,6 +296,7 @@ PY
 import csv
 import os
 import subprocess
+import shutil
 from pathlib import Path
 from collections import OrderedDict
 
@@ -350,7 +351,7 @@ if not sample_rows:
     raise SystemExit("No enabled non-control clean BAM files found for peak universe matrix")
 
 multicov_out = subprocess.check_output(
-    ["bedtools", "multicov", "-bams", *[str(x["bam"]) for x in sample_rows], "-bed", str(universe_bed)],
+    [shutil.which("bedtools") or "/usr/local/bin/bedtools", "multicov", "-bams", *[str(x["bam"]) for x in sample_rows], "-bed", str(universe_bed)],
     text=True
 )
 
@@ -424,7 +425,7 @@ def load_annotation_rows():
 
     try:
         intersect = subprocess.check_output(
-            ["bedtools", "intersect", "-a", str(universe4), "-b", str(fallback4), "-wa", "-wb"],
+            [shutil.which("bedtools") or "/usr/local/bin/bedtools", "intersect", "-a", str(universe4), "-b", str(fallback4), "-wa", "-wb"],
             text=True
         )
         for line in intersect.splitlines():
