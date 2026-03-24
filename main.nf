@@ -126,7 +126,7 @@ chr	Chromosome of universe peak	nf-peak-consensus	${params.peak_consensus_out}/$
 start	0-based start coordinate of universe peak	nf-peak-consensus	universe_peaks.bed
 end	1-based end coordinate of universe peak	nf-peak-consensus	universe_peaks.bed
 length	Peak width in bp	nf-result-delivery	end - start
-<condition>	Condition-level presence/absence from normalized signal	nf-result-delivery	1 if any sample in condition has CPM >= ${params.exploratory_presence_cpm_threshold}, else 0
+<condition>	Condition-level reproducible peak flag	nf-result-delivery	1 if universe peak overlaps <condition>_consensus.bed, else 0
 raw_<sample>	Raw fragment/read count in universe peak for sample	nf-result-delivery	bedtools multicov on chipfilter_output/<sample>.clean.bam
 cpm_<sample>	Counts per million normalized by unique_reads_mapq4	nf-result-delivery	raw_<sample> / unique_reads_mapq4 * 1e6
 annotation	Peak annotation label	nf-chipseeker / nf-result-delivery	Preferred from universe_q0.05 annotation, fallback from overlapping consensus_q0.05 annotation
@@ -349,6 +349,28 @@ with samples_master.open(newline="") as fh:
 if not sample_rows:
     raise SystemExit("No enabled non-control clean BAM files found for peak universe matrix")
 
+conditions = []
+for row in sample_rows:
+    if row["condition"] and row["condition"] not in conditions:
+        conditions.append(row["condition"])
+
+consensus_presence = OrderedDict()
+for cond in conditions:
+    consensus_bed = peak_consensus_out / universe_profile / f"{cond}_consensus.bed"
+    if not consensus_bed.exists():
+        consensus_presence[cond] = set()
+        continue
+    intersect = subprocess.check_output(
+        ["bedtools", "intersect", "-a", str(universe_bed), "-b", str(consensus_bed), "-wa"],
+        text=True
+    )
+    overlap_keys = set()
+    for line in intersect.splitlines():
+        parts = line.rstrip().split("\\t")
+        if len(parts) >= 3:
+            overlap_keys.add((parts[0], parts[1], parts[2]))
+    consensus_presence[cond] = overlap_keys
+
 multicov_out = subprocess.check_output(
     ["bedtools", "multicov", "-bams", *[str(x["bam"]) for x in sample_rows], "-bed", str(universe_bed)],
     text=True
@@ -451,11 +473,6 @@ def load_annotation_rows():
 
 ann_map = load_annotation_rows()
 
-conditions = []
-for row in sample_rows:
-    if row["condition"] and row["condition"] not in conditions:
-        conditions.append(row["condition"])
-
 header = ["peak_id", "chr", "start", "end", "length"] + conditions
 header += [f"raw_{row['sample_id']}" for row in sample_rows]
 header += [f"cpm_{row['sample_id']}" for row in sample_rows]
@@ -481,12 +498,12 @@ for idx, line in enumerate(multicov_out.splitlines(), start=1):
         else:
             cpms.append(None)
 
+    key = (chrom, start, end)
     cond_presence = OrderedDict()
     for cond in conditions:
-        vals = [cpm for cpm, sample in zip(cpms, sample_rows) if sample["condition"] == cond and cpm is not None]
-        cond_presence[cond] = "1" if any(v >= presence_threshold for v in vals) else "0"
+        cond_presence[cond] = "1" if key in consensus_presence.get(cond, set()) else "0"
 
-    ann = ann_map.get((chrom, start, end), {})
+    ann = ann_map.get(key, {})
     row = [
         f"PU_{idx}",
         chrom,
@@ -518,7 +535,7 @@ PY
 - If batch and condition are confounded, interpret differential results as exploratory.
 - `peak_universe_matrix.${params.exploratory_universe_profile}.tsv` uses `${params.exploratory_universe_profile}/universe_peaks.bed` as a broad exploratory universe.
 - Sample-level counts in the peak universe matrix are raw counts from `bedtools multicov` on `chipfilter_output/*.clean.bam`.
-- Condition-level 0/1 columns are derived from CPM normalized by `unique_reads_mapq4` with threshold ${params.exploratory_presence_cpm_threshold}.
+- Condition-level 0/1 columns are derived from overlap with `${params.exploratory_universe_profile}/<condition>_consensus.bed`.
 MD
 
   cat > "\$dest/README.md" << 'MD'

@@ -53,7 +53,7 @@ Missing values are written as `NA`, so it is clear when a metric is not availabl
 - universe source: `nf-peak-consensus/peak_consensus_output/consensus_q0.05/universe_peaks.bed`
 - sample-level raw counts: `bedtools multicov` on `nf-chipfilter/chipfilter_output/*.clean.bam`
 - sample-level normalized values: CPM using `unique_reads_mapq4` as denominator
-- condition-level `0/1` columns: derived from normalized CPM, default threshold `>= 1 CPM`
+- condition-level `0/1` columns: derived from overlap with `<condition>_consensus.bed`
 - annotation:
   - preferred: direct `ChIPseeker` annotation of `universe_q0.05`
   - fallback: overlap-based annotation transfer from `consensus_q0.05` annotated peaks
