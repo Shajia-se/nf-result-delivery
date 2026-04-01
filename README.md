@@ -25,11 +25,11 @@ Also generates:
 - raw read count from `nf-fastp` (`.fastp.json`)
 - mapped read count and mapping rate from `nf-bwa` (`.bam.stat`)
 - duplicate percentage and deduplicated mapped read count from `nf-picard`
-- retained unique read count after `MAPQ >= 4` filtering from `nf-chipfilter`
+- retained unique read count after the configured `MAPQ_THRESHOLD` filtering from `nf-chipfilter`
 - MACS3 peak counts from:
-  - `idr_q0.1`
-  - `consensus_q0.05`
-  - `strict_q0.01`
+  - `idr_q<configured>`
+  - `consensus_q<configured>`
+  - `strict_q<configured>`
 - FRiP values from:
   - `idr`
   - `consensus_q0.01`
@@ -50,7 +50,7 @@ Missing values are written as `NA`, so it is clear when a metric is not availabl
 
 Common logic for both matrices:
 - sample-level raw counts: `bedtools multicov` on `nf-chipfilter/chipfilter_output/*.clean.bam`
-- sample-level normalized values: CPM using `unique_reads_mapq4` as denominator
+- sample-level normalized values: CPM using the configured `unique_reads_mapq<MAPQ_THRESHOLD>` denominator
 - condition-level `0/1` columns: derived from overlap with `<condition>_consensus.bed`
 - annotation:
   - preferred: direct `ChIPseeker` annotation of the matching universe BED

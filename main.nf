@@ -20,6 +20,13 @@ process result_delivery {
     path("${delivery_name}")
 
   script:
+  def mapqLabel = (params.mapq_threshold ?: 24).toString()
+  def idrQ = (params.idr_qvalue ?: 0.1).toString()
+  def consensusQ = (params.consensus_qvalue ?: 0.05).toString()
+  def strictQ = (params.strict_qvalue ?: 0.01).toString()
+  def idrCol = "macs3_peaks_idr_q${idrQ}"
+  def consensusCol = "macs3_peaks_consensus_q${consensusQ}"
+  def strictCol = "macs3_peaks_strict_q${strictQ}"
   """
   set -euo pipefail
 
@@ -40,11 +47,11 @@ mapped_reads	Number of mapped reads before duplicate removal	nf-bwa	.bam.stat li
 pct_mapped_reads	Percent mapped before duplicate removal	nf-bwa	.bam.stat line: mapped percent
 mapped_reads_dedup	Number of mapped reads after duplicate removal	nf-picard	<sample>.picard_qc.stats.tsv mapped_reads_postdup
 pct_duplicates	Fraction of duplicate reads reported by Picard MarkDuplicates	nf-picard	<sample>.picard_qc.stats.tsv pct_duplicates
-unique_reads_mapq4	Reads retained in clean BAM after MAPQ>=4 and mito removal	nf-chipfilter	<sample>.chipfilter.stats.tsv clean_reads
-pct_reads_used_mapq4_of_raw	unique_reads_mapq4 divided by raw_reads x 100	nf-chipfilter + nf-result-delivery	Computed from chipfilter.stats.tsv clean_reads and fastp raw_reads
-macs3_peaks_q0.1	Peak count from MACS3 idr_q0.1 branch after peak-level blacklist filtering	nf-macs3	wc -l on idr_q0.1/<sample>_peaks.narrowPeak
-macs3_peaks_q0.05	Peak count from MACS3 relaxed consensus q0.05 branch after peak-level blacklist filtering	nf-macs3	wc -l on consensus_q0.05/<sample>_peaks.narrowPeak
-macs3_peaks_q0.01	Peak count from MACS3 strict_q0.01 branch after peak-level blacklist filtering	nf-macs3	wc -l on strict_q0.01/<sample>_peaks.narrowPeak
+unique_reads_mapq${mapqLabel}	Reads retained in clean BAM after MAPQ>=${mapqLabel} and mito removal	nf-chipfilter	<sample>.chipfilter.stats.tsv clean_reads
+pct_reads_used_mapq${mapqLabel}_of_raw	unique_reads_mapq${mapqLabel} divided by raw_reads x 100	nf-chipfilter + nf-result-delivery	Computed from chipfilter.stats.tsv clean_reads and fastp raw_reads
+${idrCol}	Peak count from MACS3 idr_q${idrQ} branch after peak-level blacklist filtering	nf-macs3	wc -l on idr_q${idrQ}/<sample>_peaks.narrowPeak
+${consensusCol}	Peak count from MACS3 relaxed consensus q${consensusQ} branch after peak-level blacklist filtering	nf-macs3	wc -l on consensus_q${consensusQ}/<sample>_peaks.narrowPeak
+${strictCol}	Peak count from MACS3 strict_q${strictQ} branch after peak-level blacklist filtering	nf-macs3	wc -l on strict_q${strictQ}/<sample>_peaks.narrowPeak
 frip_idr	FRiP using IDR peaks	nf-frip	<sample>.idr.frip.tsv FRiP column
 frip_consensus_q0.01	FRiP using strict_q0.01 consensus peaks	nf-frip	<sample>.consensus_q0.01.frip.tsv FRiP column
 frip_consensus_q0.05	FRiP using consensus_q0.05 peaks	nf-frip	<sample>.consensus_q0.05.frip.tsv FRiP column
@@ -59,7 +66,7 @@ end	1-based end coordinate of universe peak	nf-peak-consensus	Universe BED coord
 length	Peak width in bp	nf-result-delivery	end - start
 <condition>	Condition-level reproducible peak flag	nf-result-delivery	1 if universe peak overlaps <condition>_consensus.bed, else 0
 raw_<sample>	Raw fragment/read count in universe peak for sample	nf-result-delivery	bedtools multicov on chipfilter_output/<sample>.clean.bam
-cpm_<sample>	Counts per million normalized by unique_reads_mapq4	nf-result-delivery	raw_<sample> / unique_reads_mapq4 * 1e6
+cpm_<sample>	Counts per million normalized by unique_reads_mapq${mapqLabel}	nf-result-delivery	raw_<sample> / unique_reads_mapq${mapqLabel} * 1e6
 annotation	Peak annotation label	nf-chipseeker / nf-result-delivery	Preferred from universe_q0.05 annotation, fallback from overlapping consensus_q0.05 annotation
 gene_id	Nearest/annotated gene identifier	nf-chipseeker / nf-result-delivery	Preferred from universe_q0.05 annotation, fallback from overlapping consensus_q0.05 annotation
 gene_name	Nearest/annotated gene symbol	nf-chipseeker / nf-result-delivery	Preferred from universe_q0.05 annotation, fallback from overlapping consensus_q0.05 annotation
@@ -84,7 +91,7 @@ frip_out = Path("${params.frip_out}")
 header = [
     "sample_id", "condition", "replicate", "library_type", "is_control", "control_id",
     "raw_reads", "mapped_reads", "pct_mapped_reads", "mapped_reads_dedup", "pct_duplicates",
-    "unique_reads_mapq4", "pct_reads_used_mapq4_of_raw", "macs3_peaks_q0.1", "macs3_peaks_q0.05", "macs3_peaks_q0.01",
+    "unique_reads_mapq${mapqLabel}", "pct_reads_used_mapq${mapqLabel}_of_raw", "${idrCol}", "${consensusCol}", "${strictCol}",
     "frip_idr", "frip_consensus_q0.01", "frip_consensus_q0.05"
 ]
 print("\\t".join(header))
@@ -172,10 +179,10 @@ with samples_master.open(newline="") as fh:
         raw_reads = read_fastp_raw_reads(sample_id)
         mapped_reads, pct_mapped_reads = read_bwa_mapping(sample_id)
         mapped_reads_dedup, pct_duplicates = read_picard_stats(sample_id)
-        unique_reads_mapq4, pct_retained_after_mito = read_chipfilter_stats(sample_id)
-        macs3_peaks_q01 = line_count(macs3_out / "strict_q0.01" / f"{sample_id}_peaks.narrowPeak")
-        macs3_peaks_q05 = line_count(macs3_out / "consensus_q0.05" / f"{sample_id}_peaks.narrowPeak")
-        macs3_peaks_q10 = line_count(macs3_out / "idr_q0.1" / f"{sample_id}_peaks.narrowPeak")
+        unique_reads_mapq24, pct_retained_after_mito = read_chipfilter_stats(sample_id)
+        macs3_peaks_q01 = line_count(macs3_out / "strict_q${strictQ}" / f"{sample_id}_peaks.narrowPeak")
+        macs3_peaks_q05 = line_count(macs3_out / "consensus_q${consensusQ}" / f"{sample_id}_peaks.narrowPeak")
+        macs3_peaks_q10 = line_count(macs3_out / "idr_q${idrQ}" / f"{sample_id}_peaks.narrowPeak")
         frip_idr = read_frip(sample_id, "idr")
         frip_consensus_q001 = read_frip(sample_id, "consensus_q0.01")
         if not frip_consensus_q001:
@@ -184,8 +191,8 @@ with samples_master.open(newline="") as fh:
 
         pct_reads_used = ""
         try:
-            if raw_reads and unique_reads_mapq4:
-                pct_reads_used = f"{(float(unique_reads_mapq4) / float(raw_reads)) * 100:.2f}"
+            if raw_reads and unique_reads_mapq24:
+                pct_reads_used = f"{(float(unique_reads_mapq24) / float(raw_reads)) * 100:.2f}"
         except Exception:
             pct_reads_used = ""
 
@@ -209,7 +216,7 @@ with samples_master.open(newline="") as fh:
             na(pct_mapped_reads),
             na(mapped_reads_dedup),
             na(pct_duplicates),
-            na(unique_reads_mapq4),
+            na(unique_reads_mapq24),
             na(pct_reads_used),
             na(macs3_peaks_q10),
             na(macs3_peaks_q05),
